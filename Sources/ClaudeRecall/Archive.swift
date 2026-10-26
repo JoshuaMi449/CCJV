@@ -159,10 +159,23 @@ enum ArchiveStore {
 
     static var directoryURL: URL {
         if let directoryOverride { return directoryOverride }
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.homeDirectoryForCurrentUser
+        let fm = FileManager.default
+        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fm.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support", isDirectory: true)
-        return base.appendingPathComponent("Claude Recall", isDirectory: true)
+        let current = base.appendingPathComponent("CCJV", isDirectory: true)
+        let legacy = base.appendingPathComponent("Claude Recall", isDirectory: true)
+
+        if !fm.fileExists(atPath: current.path),
+           fm.fileExists(atPath: legacy.path) {
+            do {
+                try fm.moveItem(at: legacy, to: current)
+            } catch {
+                // Keep using the old location rather than losing archive/workspace data.
+                return legacy
+            }
+        }
+        return current
     }
 
     static var archiveFolderURL: URL {

@@ -5,7 +5,7 @@ import CoreServices
 final class SessionWatcher {
     private let root: URL
     private let onChange: () -> Void
-    private let queue = DispatchQueue(label: "com.local.ClaudeRecall.session-watcher")
+    private let queue = DispatchQueue(label: "com.joshuami449.ccjv.session-watcher")
     private var stream: FSEventStreamRef?
 
     init(

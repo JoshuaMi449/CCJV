@@ -770,11 +770,11 @@ final class AppModel: ObservableObject {
 
     func archiveDeleteMessage(for id: String?) -> String {
         guard let id else {
-            return "只删除 Claude Recall 的归档副本，不会动原始 JSON。"
+            return "只删除 CCJV 的归档副本，不会动原始 JSON。"
         }
         let related = archiveRelatedIDs(for: id).subtracting([id])
         guard !related.isEmpty else {
-            return "只删除 Claude Recall 的归档副本，不会动原始 JSON。若原始文件已不存在，删除后这个会话将无法再查看。"
+            return "只删除 CCJV 的归档副本，不会动原始 JSON。若原始文件已不存在，删除后这个会话将无法再查看。"
         }
         let names = related.prefix(3).map { relatedID in
             guard let summary = sessions.first(where: { $0.id == relatedID }) else {
@@ -787,7 +787,7 @@ final class AppModel: ObservableObject {
             return title
         }
         let suffix = related.count > 3 ? " 等 \(related.count) 段" : ""
-        return "只删除 Claude Recall 的归档副本，不会动原始 JSON。此段与「\(names.joined(separator: "」「"))」\(suffix)有续接关系，删除后这条链会断开。"
+        return "只删除 CCJV 的归档副本，不会动原始 JSON。此段与「\(names.joined(separator: "」「"))」\(suffix)有续接关系，删除后这条链会断开。"
     }
 
     // MARK: - Session names and groups

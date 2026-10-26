@@ -719,7 +719,7 @@ private struct SessionTray: View {
             kind: .session(session.id),
             title: "重命名会话",
             initial: session.displayTitle,
-            note: "只修改 Claude Recall 里的显示名，不改原始 .jsonl 文件名，避免影响 Claude Code 的 resume 和子代理目录。"
+            note: "只修改 CCJV 里的显示名，不改原始 .jsonl 文件名，避免影响 Claude Code 的 resume 和子代理目录。"
         )
     }
 
@@ -1982,7 +1982,7 @@ private struct ReadingCanvas: View {
                 title: "重命名会话",
                 fieldLabel: "名称",
                 initialValue: session.displayTitle,
-                note: "只修改 Claude Recall 里的显示名，不改原始 .jsonl 文件名，避免影响 Claude Code 的 resume 和子代理目录。",
+                note: "只修改 CCJV 里的显示名，不改原始 .jsonl 文件名，避免影响 Claude Code 的 resume 和子代理目录。",
                 confirmLabel: "保存"
             ) { name in
                 model.renameSession(session.id, to: name)
@@ -2175,7 +2175,7 @@ private struct ReadingCanvas: View {
     private var title: String {
         model.conversation?.session.displayTitle
             ?? model.selectedSummary?.displayTitle
-            ?? "Claude Recall"
+            ?? "CCJV"
     }
 
     private var isArchivedSession: Bool {
@@ -2207,7 +2207,7 @@ private struct ReadingCanvas: View {
 
             if conversation.session.isArchived {
                 statPill("来源", "归档")
-                    .help("原始 JSON 已被清理；当前内容来自 Claude Recall 本地归档。")
+                    .help("原始 JSON 已被清理；当前内容来自 CCJV 本地归档。")
             }
 
             if model.hasArchivedCopy(conversation.session.id),

@@ -20,10 +20,10 @@ CCJV turns raw Claude Code transcripts into a readable conversation view: your q
 Prebuilt macOS releases are available on the [Releases page](https://github.com/JoshuaMi449/CCJV/releases).
 
 1. Download the latest `CCJV-*-macOS.zip` and unzip it.
-2. Move `Claude Recall.app` into Applications.
+2. Move `CCJV.app` into Applications.
 3. The app is not notarized: right-click the app and choose **Open**. If macOS still blocks it, allow it under **System Settings → Privacy & Security → Open Anyway**.
 
-The repository name is **CCJV**; the built app is named **Claude Recall**.
+Upgrading from the earlier `Claude Recall` build moves `~/Library/Application Support/Claude Recall/` to `~/Library/Application Support/CCJV/` automatically.
 
 ## Requirements
 
@@ -36,7 +36,7 @@ The repository name is **CCJV**; the built app is named **Claude Recall**.
 git clone https://github.com/JoshuaMi449/CCJV.git
 cd CCJV
 ./build-app.sh release
-open "dist/Claude Recall.app"
+open "dist/CCJV.app"
 ```
 
 Run the standalone regression tests with:
@@ -49,7 +49,7 @@ tools/run-p0-tests.sh
 
 - Session files are opened read-only. CCJV never renames, moves, or deletes `~/.claude/projects` files.
 - No network calls and no telemetry.
-- CCJV's optional local archive and workspace settings live under `~/Library/Application Support/Claude Recall/`.
+- CCJV's optional local archive and workspace settings live under `~/Library/Application Support/CCJV/`.
 - This repository contains source code only — no session data, archive data, or credentials.
 
 ## License

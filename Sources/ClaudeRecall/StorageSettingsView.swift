@@ -26,7 +26,7 @@ struct StorageSettingsView: View {
                     Text("存储与归档")
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(Theme.text)
-                    Text("只管理 Claude Recall 的归档副本")
+                    Text("只管理 CCJV 的归档副本")
                         .font(.system(size: 11, weight: .regular))
                         .foregroundStyle(Theme.muted)
                 }
@@ -53,7 +53,7 @@ struct StorageSettingsView: View {
             limitRow
             actions
 
-            Text("归档只保存你的提问、每轮最终回答、子代理最终回答，以及识别续接所需的消息 UUID 和上下文压缩边界；工具调用、命令、diff、代码块和图片不会保存。\n\nClaude Code 可能自动清理 30 天前的原始 JSON；已归档的会话不受影响，原始文件被清理后仍可查看，并可继续显示前后段续接关系。Claude Recall 每次打开和运行期间会自动更新归档，因此清理前至少打开过一次，才能留下归档副本。单个会话可在会话菜单里删除归档；可在同一菜单保留整条续接链，容量淘汰会按整条链处理，避免留下半条链。")
+            Text("归档只保存你的提问、每轮最终回答、子代理最终回答，以及识别续接所需的消息 UUID 和上下文压缩边界；工具调用、命令、diff、代码块和图片不会保存。\n\nClaude Code 可能自动清理 30 天前的原始 JSON；已归档的会话不受影响，原始文件被清理后仍可查看，并可继续显示前后段续接关系。CCJV 每次打开和运行期间会自动更新归档，因此清理前至少打开过一次，才能留下归档副本。单个会话可在会话菜单里删除归档；可在同一菜单保留整条续接链，容量淘汰会按整条链处理，避免留下半条链。")
                 .font(.system(size: 10.5, weight: .regular))
                 .foregroundStyle(Theme.faint)
                 .lineSpacing(3)
@@ -67,7 +67,7 @@ struct StorageSettingsView: View {
             case .clear:
                 return Alert(
                     title: Text("清空全部归档？"),
-                    message: Text("只删除 Claude Recall 的归档副本，不会动 ~/.claude 的原始 JSON。清空后现有会话不会自动重新归档，删除的内容不可恢复。"),
+                    message: Text("只删除 CCJV 的归档副本，不会动 ~/.claude 的原始 JSON。清空后现有会话不会自动重新归档，删除的内容不可恢复。"),
                     primaryButton: .destructive(Text("清空")) {
                         model.clearArchive()
                     },

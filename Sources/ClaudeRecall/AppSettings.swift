@@ -51,8 +51,25 @@ final class AppSettings: ObservableObject {
     static let accentKey = "claudeRecall.accent"
     static let archiveLimitKey = "claudeRecall.archiveLimitBytes"
     static let defaultArchiveLimit: Int64 = 1_073_741_824 // 1 GB; 0 = 不限
+    private static let legacyBundleIdentifier = "com.local.ClaudeRecall"
+
+    private static var legacyDefaults: UserDefaults? {
+        UserDefaults(suiteName: legacyBundleIdentifier)
+    }
+
+    private static func migrateLegacyDefaultsIfNeeded() {
+        let defaults = UserDefaults.standard
+        let legacy = legacyDefaults
+        for key in [darkKey, accentKey, archiveLimitKey] {
+            if defaults.object(forKey: key) == nil,
+               let value = legacy?.object(forKey: key) {
+                defaults.set(value, forKey: key)
+            }
+        }
+    }
 
     static var archiveLimitBytes: Int64 {
+        migrateLegacyDefaultsIfNeeded()
         let value = UserDefaults.standard.object(forKey: archiveLimitKey) as? NSNumber
         return value?.int64Value ?? defaultArchiveLimit
     }
@@ -66,6 +83,7 @@ final class AppSettings: ObservableObject {
     @Published private(set) var revision = 0
 
     init() {
+        Self.migrateLegacyDefaultsIfNeeded()
         let defaults = UserDefaults.standard
         darkMode = defaults.object(forKey: Self.darkKey) as? Bool ?? false
         accent = AccentTheme(rawValue: defaults.string(forKey: Self.accentKey) ?? "") ?? .blue

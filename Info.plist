@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Claude Recall</string>
+    <string>CCJV</string>
     <key>CFBundleDisplayName</key>
-    <string>Claude Recall</string>
+    <string>CCJV</string>
     <key>CFBundleIdentifier</key>
-    <string>com.local.ClaudeRecall</string>
+    <string>com.joshuami449.ccjv</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.1.1</string>
     <key>CFBundleExecutable</key>
-    <string>ClaudeRecall</string>
+    <string>CCJV</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
