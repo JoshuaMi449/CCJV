@@ -2934,7 +2934,7 @@ private struct ReadingCanvas: View {
                     proxy.scrollTo("item-\(focus.itemID)", anchor: .center)
                 }
             }
-            .task(id: model.turnFocus?.id) {
+            .task(id: "\(model.turnFocus?.id.uuidString ?? "none")-\(conversation.session.id)") {
                 guard let focus = model.turnFocus,
                       focus.sessionID == conversation.session.id else { return }
 
@@ -2945,6 +2945,16 @@ private struct ReadingCanvas: View {
                 for index in 0..<2 {
                     try? await Task.sleep(nanoseconds: index == 0 ? 250_000_000 : 400_000_000)
                     guard !Task.isCancelled else { return }
+                    proxy.scrollTo("question-\(focus.turnID)", anchor: .top)
+                }
+
+                // Lazy layout can settle after the first two jumps and leave
+                // the question just above/below the top edge. Re-assert only
+                // when its measured frame is not at the top.
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                guard !Task.isCancelled else { return }
+                let frame = questionFrames.first { $0.turnID == focus.turnID }
+                if frame == nil || frame!.minY > 32 || frame!.minY < -4 {
                     proxy.scrollTo("question-\(focus.turnID)", anchor: .top)
                 }
             }
