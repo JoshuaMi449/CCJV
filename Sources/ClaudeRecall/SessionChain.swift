@@ -205,6 +205,7 @@ enum SessionChain {
         if let date = timestamp(of: turn.user) { dates.append(date) }
         dates.append(contentsOf: turn.process.compactMap { timestamp(of: $0) })
         if let date = timestamp(of: turn.answer) { dates.append(date) }
+        dates.append(contentsOf: turn.afterAnswer.compactMap { timestamp(of: $0) })
         return dates.max()
     }
 

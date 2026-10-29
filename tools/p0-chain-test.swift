@@ -207,8 +207,8 @@ struct P0ChainTests {
         expect(notificationTurn.count == 1, "notification stays in one human turn")
         expect(notificationTurn[0].answer?.id == "a-real-answer", "notification reply does not steal the human answer")
         expect(
-            notificationTurn[0].process.contains { $0.id == "s-notice" },
-            "notification marker stays in process"
+            notificationTurn[0].afterAnswer.map(\.id) == ["s-notice", "a-notice-reply"],
+            "notification marker and reply render after the real answer"
         )
 
         let substantiveFollowUp = Conversation.groupTurns([

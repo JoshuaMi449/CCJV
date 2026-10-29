@@ -3227,6 +3227,18 @@ private struct TurnView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            if !turn.afterAnswer.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(turn.afterAnswer) { item in
+                        TranscriptItemView(item: item, highlightQuery: model.searchHighlightQuery)
+                            .id("hit-\(item.id)")
+                            .background { hitBackdrop(item) }
+                    }
+                }
+                .frame(maxWidth: contentWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if turn.answer == nil {
                 WaitingCard(running: turn.isRunning, model: model)
                     .frame(maxWidth: contentWidth, alignment: .leading)
@@ -3313,6 +3325,13 @@ private struct ProcessGroupView: View {
         if turn.imageCount > 0 { parts.append("\(turn.imageCount) 张图") }
         if turn.branchCount > 0 { parts.append("\(turn.branchCount) 个子代理") }
         return parts.joined(separator: " · ")
+    }
+
+    private var interimReplies: [ConversationItem] {
+        turn.process.filter { item in
+            if case .assistant = item { return true }
+            return false
+        }
     }
 
     private func expandForImageFocus() {
@@ -3410,6 +3429,19 @@ private struct ProcessGroupView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)
+            }
+
+            if !expanded, !interimReplies.isEmpty {
+                Rectangle()
+                    .fill(Theme.divider)
+                    .frame(height: 1)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(interimReplies) { item in
+                        TranscriptItemView(item: item)
+                    }
+                }
+                .padding(12)
             }
 
             if expanded {

@@ -128,6 +128,10 @@ struct TurnGroup: Identifiable {
     let user: ConversationItem?
     let process: [ConversationItem]
     let answer: ConversationItem?
+    /// Items that arrived after the chosen answer, in original order. A
+    /// background-notification reply belongs here, so the reader keeps the
+    /// same top-to-bottom order as the terminal.
+    let afterAnswer: [ConversationItem]
 
     var branchCount: Int {
         process.reduce(into: 0) { count, item in
@@ -256,6 +260,7 @@ extension Conversation {
 
         return builders.enumerated().map { index, builder in
             var process = builder.items
+            var afterAnswer: [ConversationItem] = []
             var answer: ConversationItem?
 
             let assistants = builder.items.enumerated().filter { _, item in
@@ -283,7 +288,6 @@ extension Conversation {
                 // A short background-notification reply must not replace the
                 // substantive answer to the human question.
                 answer = earlier.element
-                process.removeAll { $0.id == earlier.element.id }
             } else if let last = assistants.last {
                 let lastText = assistantText(last.element)
                 let earlierSubstantial = assistants.dropLast().last { _, item in
@@ -292,11 +296,17 @@ extension Conversation {
 
                 if (lastText?.count ?? 0) < 16, let earlierSubstantial {
                     answer = earlierSubstantial.element
-                    process.removeAll { $0.id == earlierSubstantial.element.id }
                 } else {
                     answer = last.element
-                    process.removeAll { $0.id == last.element.id }
                 }
+            }
+
+            if let answer,
+               let answerIndex = builder.items.firstIndex(where: { $0.id == answer.id }) {
+                process = Array(builder.items[..<answerIndex])
+                afterAnswer = Array(builder.items[(answerIndex + 1)...])
+            } else if let answer {
+                process.removeAll { $0.id == answer.id }
             }
 
             let id = builder.user?.id ?? "turn-\(index)"
@@ -304,7 +314,8 @@ extension Conversation {
                 id: id,
                 user: builder.user,
                 process: process,
-                answer: answer
+                answer: answer,
+                afterAnswer: afterAnswer
             )
         }
     }
