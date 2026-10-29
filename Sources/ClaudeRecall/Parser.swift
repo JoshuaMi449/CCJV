@@ -268,6 +268,40 @@ enum ToolFormat {
         return Array(lines.prefix(320)).joined(separator: "\n")
     }
 
+    static func questionPrompts(input: [String: Any]) -> [QuestionPrompt] {
+        guard let questions = input["questions"] as? [[String: Any]] else { return [] }
+        return questions.enumerated().map { index, raw in
+            let options = (raw["options"] as? [[String: Any]] ?? []).enumerated().map { offset, option in
+                QuestionOption(
+                    id: "\(index)-\(offset)",
+                    label: option["label"] as? String ?? "",
+                    description: option["description"] as? String ?? "",
+                    preview: option["preview"] as? String
+                )
+            }
+            return QuestionPrompt(
+                id: String(index),
+                question: raw["question"] as? String ?? "",
+                header: raw["header"] as? String ?? "",
+                multiSelect: raw["multiSelect"] as? Bool ?? false,
+                options: options
+            )
+        }
+    }
+
+    static func questionAnswers(toolUseResult: [String: Any]?) -> [String: QuestionAnswer] {
+        guard let result = toolUseResult,
+              let rawAnswers = result["answers"] as? [String: String] else { return [:] }
+        let annotations = result["annotations"] as? [String: Any] ?? [:]
+        return rawAnswers.reduce(into: [:]) { answers, pair in
+            let annotation = annotations[pair.key] as? [String: Any]
+            answers[pair.key] = QuestionAnswer(
+                choice: pair.value,
+                notes: annotation?["notes"] as? String
+            )
+        }
+    }
+
     static func inputSummary(name: String, input: [String: Any]) -> String {
         let path = (input["file_path"] as? String) ?? (input["path"] as? String)
         switch name {
@@ -294,12 +328,22 @@ enum ToolFormat {
             return "搜索 \(input["query"] as? String ?? "…")"
         case "TodoWrite":
             return "更新任务清单"
+        case "AskUserQuestion":
+            let prompts = questionPrompts(input: input)
+            if let first = prompts.first, !first.header.isEmpty {
+                return prompts.count > 1 ? "\(first.header) 等 \(prompts.count) 个问题" : first.header
+            }
+            return "向你提问"
         default:
             return name
         }
     }
 
     static func resultDetail(name: String, content: Any?, toolUseResult: [String: Any]?) -> String {
+        if name == "AskUserQuestion" {
+            return questionAnswers(toolUseResult: toolUseResult).isEmpty ? "等待回答" : "已回答"
+        }
+
         if name == "Edit" || name == "Write" || name == "MultiEdit" {
             if let patch = toolUseResult?["structuredPatch"] as? [[String: Any]] {
                 var added = 0
@@ -572,7 +616,8 @@ final class SessionParser {
                     command: input["command"] as? String,
                     path: ToolFormat.path(input: input),
                     diff: nil,
-                    facts: ToolFormat.inputFacts(name: name, input: input)
+                    facts: ToolFormat.inputFacts(name: name, input: input),
+                    prompts: name == "AskUserQuestion" ? ToolFormat.questionPrompts(input: input) : []
                 )
                 items.append(.tool(id: toolId, info: info, timestamp: timestamp))
                 toolIndices[toolId] = items.count - 1
@@ -613,6 +658,9 @@ final class SessionParser {
             content: block["content"],
             toolUseResult: toolUseResult
         )
+        if info.name == "AskUserQuestion" {
+            updated.answers = ToolFormat.questionAnswers(toolUseResult: toolUseResult)
+        }
         items[index] = .tool(id: id, info: updated, timestamp: timestamp)
 
         if let pending = pendingAgents.removeValue(forKey: toolId) {
@@ -770,7 +818,8 @@ enum BranchParser {
                             command: input["command"] as? String,
                             path: ToolFormat.path(input: input),
                             diff: nil,
-                            facts: ToolFormat.inputFacts(name: name, input: input)
+                            facts: ToolFormat.inputFacts(name: name, input: input),
+                            prompts: name == "AskUserQuestion" ? ToolFormat.questionPrompts(input: input) : []
                         )
                         items.append(.tool(id: toolId, info: info, timestamp: timestamp))
                         toolIndices[toolId] = items.count - 1

@@ -50,6 +50,26 @@ struct ToolFact: Identifiable {
     let value: String
 }
 
+struct QuestionOption: Identifiable {
+    let id: String
+    let label: String
+    let description: String
+    let preview: String?
+}
+
+struct QuestionPrompt: Identifiable {
+    let id: String
+    let question: String
+    let header: String
+    let multiSelect: Bool
+    let options: [QuestionOption]
+}
+
+struct QuestionAnswer {
+    let choice: String
+    let notes: String?
+}
+
 struct ToolInfo {
     var name: String
     var summary: String
@@ -59,6 +79,9 @@ struct ToolInfo {
     var path: String?
     var diff: String?
     var facts: [ToolFact]
+    /// AskUserQuestion prompts and the user's selections, keyed by question.
+    var prompts: [QuestionPrompt] = []
+    var answers: [String: QuestionAnswer] = [:]
 }
 
 final class BranchNode: ObservableObject, Identifiable {

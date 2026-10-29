@@ -44,6 +44,26 @@ enum AccentTheme: String, CaseIterable, Identifiable {
         case .purple: return Color(hex: 0xD8C2FF)
         }
     }
+
+    /// A second accent that stays distinct from the theme color used for
+    /// links, search hits, and body emphasis.
+    var emphasis: Color {
+        switch self {
+        case .orange: return Color(hex: 0x4F6FE8)
+        case .blue: return Color(hex: 0xD9801F)
+        case .green: return Color(hex: 0x6E56CF)
+        case .purple: return Color(hex: 0x0F8B85)
+        }
+    }
+
+    var emphasisLight: Color {
+        switch self {
+        case .orange: return Color(hex: 0x8FA6FF)
+        case .blue: return Color(hex: 0xF0AE55)
+        case .green: return Color(hex: 0xA98BFF)
+        case .purple: return Color(hex: 0x43C4BC)
+        }
+    }
 }
 
 final class AppSettings: ObservableObject {

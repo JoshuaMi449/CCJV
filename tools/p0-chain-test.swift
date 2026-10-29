@@ -237,6 +237,21 @@ struct P0ChainTests {
             "isMeta injections are not human questions"
         )
 
+        let questionJSON = try JSONSerialization.jsonObject(
+            with: Data(#"{"questions":[{"question":"用哪种结构？","header":"结构","multiSelect":false,"options":[{"label":"A","description":"a"},{"label":"B","description":"b"}]}]}"#.utf8)
+        ) as! [String: Any]
+        let prompts = ToolFormat.questionPrompts(input: questionJSON)
+        expect(prompts.count == 1, "question prompt count")
+        expect(prompts.first?.options.count == 2, "question option count")
+        expect(ToolFormat.inputSummary(name: "AskUserQuestion", input: questionJSON) == "结构", "question summary uses header")
+
+        let answerJSON = try JSONSerialization.jsonObject(
+            with: Data(#"{"answers":{"用哪种结构？":"A"},"annotations":{"用哪种结构？":{"notes":"补充"}}}"#.utf8)
+        ) as! [String: Any]
+        let answers = ToolFormat.questionAnswers(toolUseResult: answerJSON)
+        expect(answers["用哪种结构？"]?.choice == "A", "question answer choice")
+        expect(answers["用哪种结构？"]?.notes == "补充", "question answer notes")
+
         let earlyNotification = Conversation.groupTurns([
             .user(id: "n3", text: "question", timestamp: nil),
             .system(id: "notice3", text: "后台任务通知"),

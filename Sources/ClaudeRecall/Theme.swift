@@ -26,6 +26,14 @@ enum Theme {
     static var accentSoft: Color { accent.opacity(isDark ? 0.16 : 0.10) }
     static var accentLine: Color { accent.opacity(isDark ? 0.30 : 0.22) }
 
+    // MARK: Emphasis
+
+    /// Secondary accent for interactive cards (questions, prompts). Kept
+    /// deliberately different from `accent` so cards never read as body text.
+    static var emphasis: Color { isDark ? accentTheme.emphasisLight : accentTheme.emphasis }
+    static var emphasisSoft: Color { emphasis.opacity(isDark ? 0.16 : 0.10) }
+    static var emphasisLine: Color { emphasis.opacity(isDark ? 0.32 : 0.24) }
+
     static var accentInk: Color {
         switch accentTheme {
         case .orange: return Color(hex: 0x2A1305)

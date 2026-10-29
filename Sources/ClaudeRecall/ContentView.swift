@@ -3327,10 +3327,16 @@ private struct ProcessGroupView: View {
         return parts.joined(separator: " · ")
     }
 
-    private var interimReplies: [ConversationItem] {
+    private var collapsedPreview: [ConversationItem] {
         turn.process.filter { item in
-            if case .assistant = item { return true }
-            return false
+            switch item {
+            case .assistant:
+                return true
+            case .tool(_, let info, _):
+                return info.name == "AskUserQuestion" && !info.prompts.isEmpty
+            default:
+                return false
+            }
         }
     }
 
@@ -3431,13 +3437,13 @@ private struct ProcessGroupView: View {
                 .padding(.bottom, 10)
             }
 
-            if !expanded, !interimReplies.isEmpty {
+            if !expanded, !collapsedPreview.isEmpty {
                 Rectangle()
                     .fill(Theme.divider)
                     .frame(height: 1)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(interimReplies) { item in
+                    ForEach(collapsedPreview) { item in
                         TranscriptItemView(item: item)
                     }
                 }
@@ -3572,7 +3578,11 @@ private struct TranscriptItemView: View {
         case .assistant(_, let text, let model, let timestamp):
             AssistantMessage(text: text, model: model, timestamp: timestamp, highlightQuery: highlightQuery)
         case .tool(_, let info, _):
-            ToolRow(info: info)
+            if info.name == "AskUserQuestion", !info.prompts.isEmpty {
+                AskUserQuestionCard(info: info)
+            } else {
+                ToolRow(info: info)
+            }
         case .branch(_, let node):
             BranchCard(node: node)
         case .compaction(_, let pre, let post):
@@ -3834,6 +3844,182 @@ private struct ToolRow: View {
             return .system(size: 10, weight: .regular, design: .monospaced)
         }
         return .system(size: 10.5, weight: .medium)
+    }
+}
+
+struct AskUserQuestionCard: View {
+    let info: ToolInfo
+    @State private var expanded = true
+
+    private var answered: Bool {
+        !info.answers.isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 11) {
+                    Image(systemName: "questionmark.bubble.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.emphasis)
+                        .frame(width: 30, height: 30)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Theme.emphasisSoft)
+                        )
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Claude 向你提问")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(Theme.textSoft)
+                        Text(info.summary)
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(Theme.faint)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    Text(answered ? "已回答" : "等待回答")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(answered ? Theme.green : Theme.emphasis)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule().fill(
+                                answered
+                                    ? Theme.green.opacity(0.1)
+                                    : Theme.emphasis.opacity(0.12)
+                            )
+                        )
+
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Theme.faint)
+                }
+                .padding(11)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+
+            if expanded {
+                Rectangle().fill(Theme.divider).frame(height: 1)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(info.prompts) { prompt in
+                        promptView(prompt)
+                    }
+                }
+                .padding(12)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .fill(Theme.subtleFill.opacity(0.62))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(Theme.emphasisLine.opacity(0.6), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func promptView(_ prompt: QuestionPrompt) -> some View {
+        let answer = info.answers[prompt.question]
+        let matched = answer.map { selected in
+            prompt.options.contains { isSelected($0, answer: selected) }
+        } ?? false
+
+        VStack(alignment: .leading, spacing: 8) {
+            if !prompt.header.isEmpty {
+                Text(prompt.header)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Theme.emphasis)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Theme.emphasisSoft))
+            }
+
+            Text(prompt.question)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.text)
+                .lineSpacing(5)
+                .textSelection(.enabled)
+
+            ForEach(prompt.options) { option in
+                optionRow(option, selected: isSelected(option, answer: answer))
+            }
+
+            if let answer {
+                if !matched {
+                    Text(answer.choice.lowercased().contains("notes")
+                         ? "没有选选项，只写了备注"
+                         : "你的回答：\(answer.choice)")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(Theme.emphasis)
+                }
+                if let notes = answer.notes, !notes.isEmpty {
+                    HStack(alignment: .top, spacing: 6) {
+                        Text("备注")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(Theme.emphasis)
+                            .padding(.top, 1)
+                        Text(notes)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(Theme.textSoft)
+                            .lineSpacing(4)
+                            .textSelection(.enabled)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+        }
+    }
+
+    private func isSelected(_ option: QuestionOption, answer: QuestionAnswer?) -> Bool {
+        guard let choice = answer?.choice else { return false }
+        if choice == option.label { return true }
+        return choice
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .contains(option.label)
+    }
+
+    private func optionRow(_ option: QuestionOption, selected: Bool) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(selected ? Theme.emphasis : Theme.faint)
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(option.label)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(selected ? Theme.text : Theme.muted)
+                if !option.description.isEmpty {
+                    Text(option.description)
+                        .font(.system(size: 10.5, weight: .regular))
+                        .foregroundStyle(selected ? Theme.textSoft : Theme.faint)
+                        .lineSpacing(3)
+                        .lineLimit(3)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(selected ? Theme.emphasisSoft.opacity(0.7) : Color.clear)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(selected ? Theme.emphasisLine : Theme.divider, lineWidth: 1)
+        }
     }
 }
 
