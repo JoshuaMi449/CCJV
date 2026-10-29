@@ -478,6 +478,20 @@ final class SessionParser {
     private func updateTaskNotification(_ object: [String: Any]) {
         guard let message = object["message"] as? [String: Any] else { return }
         let text = JSONL.messageText(message) ?? ""
+        let reportTitle: String = {
+            guard let start = text.range(of: "<summary>"),
+                  let end = text.range(of: "</summary>", range: start.upperBound..<text.endIndex) else {
+                return "后台任务通知"
+            }
+            let summary = text[start.upperBound..<end.lowerBound]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return summary.isEmpty ? "后台任务通知" : "后台任务通知 · \(summary)"
+        }()
+        items.append(.system(
+            id: object["uuid"] as? String ?? UUID().uuidString,
+            text: reportTitle
+        ))
+
         guard let agentId = ToolFormat.agentId(from: nil, content: text) else { return }
         for item in items {
             if case .branch(_, let node) = item, node.id == agentId {

@@ -188,6 +188,29 @@ struct P0ChainTests {
         )
         expect(noStaleClear.activeID == "q2", "empty frames do not clear active question")
 
+        let notificationTurn = Conversation.groupTurns([
+            .user(id: "n1", text: "question", timestamp: nil),
+            .assistant(
+                id: "real-answer",
+                text: String(repeating: "真正回答", count: 20),
+                model: "test",
+                timestamp: nil
+            ),
+            .system(id: "notice", text: "后台任务通知 · monitor"),
+            .assistant(
+                id: "notice-reply",
+                text: "收到一条后台通知，这不是你的新指令。",
+                model: "test",
+                timestamp: nil
+            )
+        ])
+        expect(notificationTurn.count == 1, "notification stays in one human turn")
+        expect(notificationTurn[0].answer?.id == "a-real-answer", "notification reply does not steal the human answer")
+        expect(
+            notificationTurn[0].process.contains { $0.id == "s-notice" },
+            "notification marker stays in process"
+        )
+
         // Archive health + whole-chain capacity protection.
         let root = URL(fileURLWithPath: "/tmp/recall-p0-tools-archive")
         try? FileManager.default.removeItem(at: root)
