@@ -263,31 +263,25 @@ extension Conversation {
                 return false
             }
 
-            let firstNotification = builder.items.firstIndex { item in
-                if case .system = item { return true }
+            let notifications = builder.items.indices.filter { index in
+                if case .system = builder.items[index] { return true }
                 return false
             }
-            let hasReplyAfterNotification = firstNotification.map { notification in
-                assistants.contains { $0.offset > notification }
-            } ?? false
-            let answerBeforeNotification = firstNotification.flatMap { notification -> (offset: Int, element: ConversationItem)? in
+            let answerBeforeNotification = notifications.reversed().compactMap { notification -> (offset: Int, element: ConversationItem)? in
+                guard assistants.contains(where: { $0.offset > notification }) else { return nil }
                 guard let candidate = assistants.last(where: {
                     $0.offset < notification
-                        && (assistantText($0.element)?.count ?? 0) >= 40
+                        && AnswerSelection.isSubstantive(assistantText($0.element) ?? "")
                 }) else { return nil }
-                let between = builder.items[(candidate.offset + 1)..<notification]
-                let interrupted = between.contains { item in
-                    if case .tool = item { return true }
-                    if case .branch = item { return true }
-                    return false
-                }
-                return interrupted ? nil : candidate
-            }
+                return candidate
+            }.first
+            let notificationFollowUp = assistants.last.flatMap { assistantText($0.element) }
 
-            if let earlier = answerBeforeNotification, hasReplyAfterNotification {
-                // A background task notification arrived after the real answer
-                // and then triggered another assistant reply. Do not let that
-                // reply replace the answer to the human question.
+            if let earlier = answerBeforeNotification,
+               let followUp = notificationFollowUp,
+               AnswerSelection.isNotificationFollowUp(followUp) {
+                // A short background-notification reply must not replace the
+                // substantive answer to the human question.
                 answer = earlier.element
                 process.removeAll { $0.id == earlier.element.id }
             } else if let last = assistants.last {

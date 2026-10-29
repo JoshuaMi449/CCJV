@@ -33,7 +33,21 @@ enum SessionIndexer {
             }
         }
 
-        return results.sorted { $0.date > $1.date }
+        // A copied/restored project directory can contain the same session
+        // UUID twice. Keep one deterministic copy instead of letting a
+        // Dictionary(uniqueKeysWithValues:) crash the app.
+        var byID: [String: SessionSummary] = [:]
+        for result in results {
+            if let existing = byID[result.id] {
+                if result.date > existing.date
+                    || (result.date == existing.date && result.fileURL.path < existing.fileURL.path) {
+                    byID[result.id] = result
+                }
+            } else {
+                byID[result.id] = result
+            }
+        }
+        return byID.values.sorted { $0.date > $1.date }
     }
 
     /// The file's modification date is not a reliable conversation date:

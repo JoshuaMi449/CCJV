@@ -93,7 +93,15 @@ enum SessionWorkspaceStore {
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode(SessionWorkspace.self, from: data)) ?? SessionWorkspace()
+        if let workspace = try? decoder.decode(SessionWorkspace.self, from: data) {
+            return workspace
+        }
+        let backup = folderURL.appendingPathComponent(
+            "workspace.corrupt-\(Int(Date().timeIntervalSince1970)).json"
+        )
+        try? FileManager.default.moveItem(at: fileURL, to: backup)
+        NSLog("CCJV: workspace.json was unreadable; preserved a copy at %@", backup.path)
+        return SessionWorkspace()
     }
 
     static func save(_ workspace: SessionWorkspace) {

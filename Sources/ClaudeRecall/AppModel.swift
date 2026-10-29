@@ -225,6 +225,10 @@ final class AppModel: ObservableObject {
                 self.sessions = merged
                 self.normalizeGroupsForChains()
                 self.status = merged.isEmpty ? "没有找到会话" : "\(merged.count) 个会话"
+                if let scope = self.searchScopeSessionID,
+                   !merged.contains(where: { $0.id == scope }) {
+                    self.setSearchScope(nil)
+                }
                 self.contentIndex = entries
 
                 if let selectedID = self.selectedID {
@@ -237,6 +241,18 @@ final class AppModel: ObservableObject {
 
                 if self.selectedID == nil, let first = merged.first {
                     self.select(first.id)
+                }
+                if let selectedID = self.selectedID,
+                   !merged.contains(where: { $0.id == selectedID }) {
+                    self.cache.removeValue(forKey: selectedID)
+                    self.mergedCache.removeValue(forKey: selectedID)
+                    self.conversation = nil
+                    self.selectedID = merged.first?.id
+                    if let first = merged.first {
+                        self.select(first.id)
+                    } else {
+                        self.isLoading = false
+                    }
                 }
                 if let selectedID = self.selectedID, removedRawIDs.contains(selectedID) {
                     if merged.contains(where: { $0.id == selectedID }) {
@@ -1125,6 +1141,10 @@ final class AppModel: ObservableObject {
             contentIndex.removeAll { lostIDs.contains($0.sessionID) }
             cache = cache.filter { !lostIDs.contains($0.key) }
             mergedCache.removeAll()
+        }
+        if let scope = searchScopeSessionID,
+           !sessions.contains(where: { $0.id == scope }) {
+            setSearchScope(nil)
         }
         for id in evicted where rawIDs.contains(id) {
             if let index = sessions.firstIndex(where: { $0.id == id }),

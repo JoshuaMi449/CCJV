@@ -29,11 +29,13 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
 
-                        SessionTray(model: model)
+                        SessionTray(model: model, isVisible: sidebarVisible)
                             .frame(width: 284)
                             .offset(x: sidebarVisible ? 0 : -294)
                             .opacity(sidebarVisible ? 1 : 0)
                             .allowsHitTesting(sidebarVisible)
+                            .disabled(!sidebarVisible)
+                            .accessibilityHidden(!sidebarVisible)
                             .zIndex(1)
                     }
                 }
@@ -120,6 +122,7 @@ private struct BrandBall: View {
 
 private struct SessionTray: View {
     @ObservedObject var model: AppModel
+    var isVisible: Bool = true
     @FocusState private var searchFocused: Bool
     @State private var outlineSessionID: String?
     @State private var activePromptID: String?
@@ -314,6 +317,11 @@ private struct SessionTray: View {
         .onChange(of: model.query) { _, newValue in
             if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 clearSelection()
+            }
+        }
+        .onChange(of: isVisible) { _, visible in
+            if !visible {
+                searchFocused = false
             }
         }
     }
@@ -1037,8 +1045,9 @@ private struct SessionTray: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            if model.sessions.isEmpty {
+        let finished = model.status == "没有找到会话"
+        return VStack(spacing: 8) {
+            if !finished {
                 ProgressView()
                     .controlSize(.small)
                     .tint(Theme.accent)
@@ -1048,7 +1057,7 @@ private struct SessionTray: View {
                     .foregroundStyle(Theme.faint)
             }
 
-            Text(model.sessions.isEmpty ? "正在扫描 ~/.claude/projects…" : "没有匹配的会话")
+            Text(finished ? "没有找到会话" : "正在扫描 ~/.claude/projects…")
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(Theme.faint)
         }
@@ -1926,6 +1935,7 @@ private struct ReadingCanvas: View {
     @State private var showingGallery = false
     @State private var showingStorage = false
     @State private var showingDeleteArchive = false
+    @State private var archiveDeletionTargetID: String?
     @State private var renamingSession: SessionSummary?
     @State private var scrollTarget: String?
     @State private var pinnedProcess: PinnedProcessInfo?
@@ -1990,13 +2000,16 @@ private struct ReadingCanvas: View {
         }
         .alert("删除此会话的归档？", isPresented: $showingDeleteArchive) {
             Button("删除", role: .destructive) {
-                if let id = model.selectedID {
+                if let id = archiveDeletionTargetID {
                     model.deleteArchivedSession(id)
                 }
+                archiveDeletionTargetID = nil
             }
-            Button("取消", role: .cancel) {}
+            Button("取消", role: .cancel) {
+                archiveDeletionTargetID = nil
+            }
         } message: {
-            Text(model.archiveDeleteMessage(for: model.selectedID))
+            Text(model.archiveDeleteMessage(for: archiveDeletionTargetID))
         }
     }
 
@@ -2119,6 +2132,7 @@ private struct ReadingCanvas: View {
                         show(model.isArchivePinned(id) ? "已保留此链" : "已取消保留")
                     }
                     Button("删除此归档", role: .destructive) {
+                        archiveDeletionTargetID = model.selectedID
                         showingDeleteArchive = true
                     }
                 }

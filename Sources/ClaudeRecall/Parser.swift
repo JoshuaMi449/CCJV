@@ -69,6 +69,9 @@ enum JSONL {
 
     static func isHuman(_ object: [String: Any]) -> Bool {
         if object["isCompactSummary"] as? Bool == true { return false }
+        // Skill/harness injections carry the full injected prompt as a user
+        // record. They are not questions typed by the person.
+        if object["isMeta"] as? Bool == true { return false }
         if let origin = object["origin"] as? [String: Any],
            let kind = origin["kind"] as? String {
             return kind == "human"
@@ -345,6 +348,18 @@ enum ToolFormat {
         return first.isEmpty ? "完成" : String(first.prefix(90))
     }
 
+    static func tag(_ name: String, in text: String) -> String? {
+        let open = "<\(name)>"
+        let close = "</\(name)>"
+        guard let start = text.range(of: open),
+              let end = text.range(of: close, range: start.upperBound..<text.endIndex) else {
+            return nil
+        }
+        let value = text[start.upperBound..<end.lowerBound]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
     static func agentId(from toolUseResult: [String: Any]?, content: Any?) -> String? {
         if let id = toolUseResult?["agentId"] as? String, !id.isEmpty { return id }
         let text = JSONL.textContent(content)
@@ -492,11 +507,16 @@ final class SessionParser {
             text: reportTitle
         ))
 
-        guard let agentId = ToolFormat.agentId(from: nil, content: text) else { return }
+        let taskID = ToolFormat.tag("task-id", in: text)
+        let toolUseID = ToolFormat.tag("tool-use-id", in: text)
+        let status = ToolFormat.tag("status", in: text)
+        let agentId = ToolFormat.agentId(from: nil, content: text)
         for item in items {
-            if case .branch(_, let node) = item, node.id == agentId {
-                node.status = "已完成"
-            }
+            guard case .branch(_, let node) = item else { continue }
+            guard node.id == agentId
+                || node.id == taskID
+                || node.toolUseId == toolUseID else { continue }
+            node.status = status == "failed" ? "失败" : "已完成"
         }
     }
 

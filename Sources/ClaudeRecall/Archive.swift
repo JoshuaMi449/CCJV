@@ -106,7 +106,8 @@ struct ArchiveHealth: Equatable {
 
 private enum ArchiveSchema {
     /// 2 adds messageUUIDs/checkpoints and rawUUID on messages.
-    static let current = 2
+    /// 3 rebuilds answers written before task-notification boundaries were kept.
+    static let current = 5
 }
 
 private struct ArchiveState: Codable {
@@ -115,6 +116,9 @@ private struct ArchiveState: Codable {
     var suppressed: [String: String] = [:]
     /// Optional so state files written before pinning still decode.
     var pinned: Set<String>? = nil
+    /// Optional so older state files still decode. Used to re-archive
+    /// capacity-evicted sessions after the user raises the limit.
+    var lastMaxBytes: Int64? = nil
 }
 
 private struct ArchiveAssistantChunk {
@@ -152,13 +156,22 @@ private struct ArchiveTurnDraft {
     let turnID: String
     let userTimestamp: Date?
     var assistants: [ArchiveAssistantChunk] = []
+    var notificationBoundary: Int? = nil
+    var toolSinceLastAssistant = false
 }
 
 enum ArchiveStore {
     static var directoryOverride: URL?
+    private static let storeLock = NSRecursiveLock()
+    private static let directoryLock = NSRecursiveLock()
+    private static var cachedDirectory: URL?
 
     static var directoryURL: URL {
         if let directoryOverride { return directoryOverride }
+        directoryLock.lock()
+        defer { directoryLock.unlock() }
+        if let cachedDirectory { return cachedDirectory }
+
         let fm = FileManager.default
         let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? fm.homeDirectoryForCurrentUser
@@ -166,16 +179,18 @@ enum ArchiveStore {
         let current = base.appendingPathComponent("CCJV", isDirectory: true)
         let legacy = base.appendingPathComponent("Claude Recall", isDirectory: true)
 
+        var resolved = current
         if !fm.fileExists(atPath: current.path),
            fm.fileExists(atPath: legacy.path) {
             do {
                 try fm.moveItem(at: legacy, to: current)
             } catch {
-                // Keep using the old location rather than losing archive/workspace data.
-                return legacy
+                // Keep using the old location rather than splitting archive and workspace.
+                resolved = legacy
             }
         }
-        return current
+        cachedDirectory = resolved
+        return resolved
     }
 
     static var archiveFolderURL: URL {
@@ -204,6 +219,8 @@ enum ArchiveStore {
     }
 
     static func loadWithReport() -> ArchiveLoadResult {
+        storeLock.lock()
+        defer { storeLock.unlock() }
         ensureFolders()
         migrateLegacyIfNeeded()
 
@@ -244,10 +261,14 @@ enum ArchiveStore {
     }
 
     static func pinnedIDs() -> Set<String> {
-        loadState().pinned ?? []
+        storeLock.lock()
+        defer { storeLock.unlock() }
+        return loadState().pinned ?? []
     }
 
     static func setPinned(_ id: String, pinned: Bool) {
+        storeLock.lock()
+        defer { storeLock.unlock() }
         var state = loadState()
         var ids = state.pinned ?? []
         if pinned {
@@ -260,6 +281,8 @@ enum ArchiveStore {
     }
 
     static func usageBytes() -> Int64 {
+        storeLock.lock()
+        defer { storeLock.unlock() }
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(
             at: archiveFolderURL,
@@ -268,7 +291,8 @@ enum ArchiveStore {
         ) else { return 0 }
 
         var total: Int64 = 0
-        for file in files {
+        for file in files where file.pathExtension == "json"
+            && file.lastPathComponent != "state.json" {
             let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             total += Int64(size)
         }
@@ -320,11 +344,18 @@ enum ArchiveStore {
     // MARK: - State
 
     private static func loadState() -> ArchiveState {
-        guard let data = try? Data(contentsOf: stateURL),
-              let state = try? makeDecoder().decode(ArchiveState.self, from: data) else {
+        guard let data = try? Data(contentsOf: stateURL) else {
             return ArchiveState()
         }
-        return state
+        if let state = try? makeDecoder().decode(ArchiveState.self, from: data) {
+            return state
+        }
+        let backup = stateURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("state.json.corrupt-\(Int(Date().timeIntervalSince1970))")
+        try? FileManager.default.moveItem(at: stateURL, to: backup)
+        NSLog("CCJV: archive state.json was unreadable; preserved a copy at %@", backup.path)
+        return ArchiveState()
     }
 
     private static func saveState(_ state: ArchiveState) {
@@ -340,9 +371,6 @@ enum ArchiveStore {
     private static func migrateLegacyIfNeeded() {
         let fm = FileManager.default
         if fm.fileExists(atPath: stateURL.path) {
-            if fm.fileExists(atPath: legacyArchiveURL.path) {
-                try? fm.removeItem(at: legacyArchiveURL)
-            }
             return
         }
 
@@ -365,6 +393,70 @@ enum ArchiveStore {
 
     // MARK: - Sync
 
+    /// A rebuild (including a schema upgrade) must never shrink the archive
+    /// because the raw source is partially unreadable or its subagent folder
+    /// has already been cleaned up. New data wins per turn/subagent; old data
+    /// fills anything the rebuild could not reproduce. Schema upgrades that
+    /// deliberately remove injected turns must trust the fresh scan instead.
+    private static func mergeRebuilt(
+        _ fresh: ArchivedSession,
+        with old: ArchivedSession,
+        preserveMissingMessages: Bool
+    ) -> ArchivedSession {
+        var result = fresh
+        if preserveMissingMessages {
+            let freshByTurn = Dictionary(grouping: fresh.messages, by: \.turnID)
+            var messages: [ArchivedMessage] = []
+            var emittedTurns = Set<String>()
+            for message in old.messages where !emittedTurns.contains(message.turnID) {
+                emittedTurns.insert(message.turnID)
+                if let group = freshByTurn[message.turnID] {
+                    messages.append(contentsOf: group)
+                } else {
+                    messages.append(contentsOf: old.messages.filter { $0.turnID == message.turnID })
+                }
+            }
+            for message in fresh.messages where !emittedTurns.contains(message.turnID) {
+                emittedTurns.insert(message.turnID)
+                if let group = freshByTurn[message.turnID] {
+                    messages.append(contentsOf: group)
+                }
+            }
+            result.messages = messages
+        }
+
+        var subagents: [String: ArchivedSubagent] = [:]
+        for subagent in old.subagents {
+            subagents[subagent.id] = subagent
+        }
+        for subagent in fresh.subagents {
+            subagents[subagent.id] = subagent
+        }
+        result.subagents = subagents.values.sorted {
+            let left = $0.startedAt ?? .distantPast
+            let right = $1.startedAt ?? .distantPast
+            if left != right { return left < right }
+            return $0.id < $1.id
+        }
+
+        result.messageUUIDs = Array(
+            Set(old.messageUUIDs ?? []).union(fresh.messageUUIDs ?? [])
+        ).sorted()
+
+        var checkpoints = old.checkpoints ?? []
+        var checkpointKeys = Set(checkpoints.map {
+            "\($0.turnIndex)|\($0.timestamp?.timeIntervalSince1970 ?? 0)|\($0.trigger ?? "")|\($0.anchorUUID ?? "")"
+        })
+        for checkpoint in fresh.checkpoints ?? [] {
+            let key = "\(checkpoint.turnIndex)|\(checkpoint.timestamp?.timeIntervalSince1970 ?? 0)|\(checkpoint.trigger ?? "")|\(checkpoint.anchorUUID ?? "")"
+            if checkpointKeys.insert(key).inserted {
+                checkpoints.append(checkpoint)
+            }
+        }
+        result.checkpoints = checkpoints
+        return result
+    }
+
     static func sync(
         rawSessions: [SessionSummary],
         existing: ArchiveDocument,
@@ -378,9 +470,15 @@ enum ArchiveStore {
         existing: ArchiveDocument,
         maxBytes: Int64
     ) -> ArchiveSyncResult {
+        storeLock.lock()
+        defer { storeLock.unlock() }
         ensureFolders()
         migrateLegacyIfNeeded()
         var state = loadState()
+        if let previousMax = state.lastMaxBytes, maxBytes > previousMax {
+            state.suppressed = state.suppressed.filter { $0.value != "evicted" }
+        }
+        state.lastMaxBytes = maxBytes
         var byID: [String: ArchivedSession] = [:]
         var failedWriteIDs: [String] = []
 
@@ -407,8 +505,15 @@ enum ArchiveStore {
                 mainSignature: mainSignature,
                 subagentSignature: subagentSignature
             ) else { continue }
-            if writeSessionFile(built) {
-                byID[session.id] = built
+            let merged = byID[session.id].map {
+                mergeRebuilt(
+                    built,
+                    with: $0,
+                    preserveMissingMessages: ($0.schema ?? 0) >= ArchiveSchema.current
+                )
+            } ?? built
+            if writeSessionFile(merged) {
+                byID[session.id] = merged
             } else {
                 failedWriteIDs.append(session.id)
             }
@@ -432,9 +537,15 @@ enum ArchiveStore {
         on document: ArchiveDocument,
         maxBytes: Int64
     ) -> ArchiveSyncResult {
+        storeLock.lock()
+        defer { storeLock.unlock() }
         ensureFolders()
         migrateLegacyIfNeeded()
         var state = loadState()
+        if let previousMax = state.lastMaxBytes, maxBytes > previousMax {
+            state.suppressed = state.suppressed.filter { $0.value != "evicted" }
+        }
+        state.lastMaxBytes = maxBytes
         var byID: [String: ArchivedSession] = [:]
         for session in document.sessions {
             if state.suppressed[session.id] != nil {
@@ -460,6 +571,8 @@ enum ArchiveStore {
     }
 
     static func deleteSession(_ id: String, reason: String) {
+        storeLock.lock()
+        defer { storeLock.unlock() }
         ensureFolders()
         var state = loadState()
         state.suppressed[id] = reason
@@ -468,6 +581,8 @@ enum ArchiveStore {
     }
 
     static func clear(suppressing ids: Set<String>) {
+        storeLock.lock()
+        defer { storeLock.unlock() }
         ensureFolders()
         var state = loadState()
         for id in ids {
@@ -492,7 +607,12 @@ enum ArchiveStore {
         state: inout ArchiveState
     ) -> (evicted: [String], overQuota: Bool) {
         guard maxBytes > 0 else { return ([], false) }
-        var usage = usageBytes()
+        var usage: Int64 = 0
+        for session in byID.values {
+            let url = sessionFileURL(for: session.id)
+            let number = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber
+            usage += number?.int64Value ?? 0
+        }
         guard usage > maxBytes else { return ([], false) }
 
         // Evict whole continuation components, never half a chain. This keeps
@@ -568,8 +688,19 @@ enum ArchiveStore {
         }
     }
 
+    private static func injectedTurnIDs(in archived: ArchivedSession) -> Set<String> {
+        Set(archived.messages.compactMap { message in
+            guard message.role == .user,
+                  message.text.hasPrefix("Base directory for this skill:") else { return nil }
+            return message.turnID
+        })
+    }
+
     static func summary(for archived: ArchivedSession) -> SessionSummary {
-        let userMessages = archived.messages.filter { $0.role == .user }
+        let injected = injectedTurnIDs(in: archived)
+        let userMessages = archived.messages.filter {
+            $0.role == .user && !injected.contains($0.turnID)
+        }
         let previewText = userMessages.first?.text
             ?? archived.subagents.first?.report
             ?? ""
@@ -589,6 +720,7 @@ enum ArchiveStore {
     }
 
     static func conversation(for archived: ArchivedSession, summary: SessionSummary) -> Conversation {
+        let injected = injectedTurnIDs(in: archived)
         var items: [ConversationItem] = []
         var branchesByTurn: [String: [ArchivedSubagent]] = [:]
         for subagent in archived.subagents {
@@ -597,7 +729,7 @@ enum ArchiveStore {
         }
 
         var attached = Set<String>()
-        for message in archived.messages {
+        for message in archived.messages where !injected.contains(message.turnID) {
             switch message.role {
             case .user:
                 items.append(.user(
@@ -626,7 +758,9 @@ enum ArchiveStore {
             items.append(branchItem(subagent, parentID: archived.id))
         }
 
-        let startedAt = archived.messages.compactMap { $0.timestamp }.min() ?? archived.date
+        let startedAt = archived.messages
+            .filter { !injected.contains($0.turnID) }
+            .compactMap { $0.timestamp }.min() ?? archived.date
         return Conversation(
             session: summary,
             items: items,
@@ -664,7 +798,8 @@ enum ArchiveStore {
     static func searchEntries(for sessions: [ArchivedSession]) -> [ContentSearchEntry] {
         var result: [ContentSearchEntry] = []
         for session in sessions {
-            for message in session.messages {
+            let injected = injectedTurnIDs(in: session)
+            for message in session.messages where !injected.contains(message.turnID) {
                 result.append(ContentSearchEntry(
                     id: "arc-\(session.id)-\(message.id)",
                     sessionID: session.id,
@@ -777,7 +912,7 @@ enum ArchiveStore {
         var humanTurnCount = 0
 
         func appendAnswer(_ turn: ArchiveTurnDraft) {
-            guard let answer = chooseAnswer(turn.assistants),
+            guard let answer = chooseAnswer(turn),
                   !seenAnswers.contains(answer.id) else { return }
             seenAnswers.insert(answer.id)
             scan.messages.append(ArchivedMessage(
@@ -815,6 +950,13 @@ enum ArchiveStore {
             if type == "user" {
                 if let origin = object["origin"] as? [String: Any],
                    (origin["kind"] as? String) == "task-notification" {
+                    if var turn = current,
+                       let candidate = turn.assistants.lastIndex(where: {
+                           AnswerSelection.isSubstantive($0.text)
+                       }) {
+                        turn.notificationBoundary = candidate
+                        current = turn
+                    }
                     return true
                 }
                 guard let message = object["message"] as? [String: Any],
@@ -823,7 +965,11 @@ enum ArchiveStore {
                 guard !JSONL.isCommandWrapper(raw) else { return true }
                 let cleaned = JSONL.cleanUserText(raw)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !cleaned.isEmpty, !isNoise(cleaned) else { return true }
+                guard !cleaned.isEmpty else { return true }
+                if isNoise(cleaned) {
+                    flush()
+                    return true
+                }
 
                 let userID = object["uuid"] as? String ?? UUID().uuidString
                 guard !seenUsers.contains(userID) else { return true }
@@ -868,6 +1014,12 @@ enum ArchiveStore {
                     )
                 }
 
+                let hasTool = blocks.contains { ($0["type"] as? String) == "tool_use" }
+                if var turn = current, hasTool {
+                    turn.toolSinceLastAssistant = true
+                    current = turn
+                }
+
                 guard var turn = current,
                       let text = assistantText(message) else { return true }
                 let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -887,6 +1039,7 @@ enum ArchiveStore {
                         rawUUID: object["uuid"] as? String
                     ))
                 }
+                turn.toolSinceLastAssistant = hasTool
                 current = turn
             }
             return true
@@ -1021,7 +1174,7 @@ enum ArchiveStore {
             return true
         }
 
-        scan.report = chooseAnswer(chunks)?.text ?? ""
+        scan.report = chooseLastAnswer(chunks)?.text ?? ""
         return scan
     }
 
@@ -1047,7 +1200,20 @@ enum ArchiveStore {
         return text.isEmpty ? nil : text
     }
 
-    private static func chooseAnswer(_ chunks: [ArchiveAssistantChunk]) -> ArchiveAssistantChunk? {
+    private static func chooseAnswer(_ turn: ArchiveTurnDraft) -> ArchiveAssistantChunk? {
+        let chunks = turn.assistants
+        if let boundary = turn.notificationBoundary,
+           chunks.count > boundary + 1,
+           chunks.indices.contains(boundary),
+           let last = chunks.last,
+           AnswerSelection.isNotificationFollowUp(last.text),
+           AnswerSelection.isSubstantive(chunks[boundary].text) {
+            return chunks[boundary]
+        }
+        return chooseLastAnswer(chunks)
+    }
+
+    private static func chooseLastAnswer(_ chunks: [ArchiveAssistantChunk]) -> ArchiveAssistantChunk? {
         guard let last = chunks.last else { return nil }
         if last.text.trimmingCharacters(in: .whitespacesAndNewlines).count < 16,
            let earlier = chunks.dropLast().last(where: {

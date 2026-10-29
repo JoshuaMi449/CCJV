@@ -68,6 +68,8 @@ enum ContentSearchIndexer {
         let userText: String
         let userTimestamp: Date?
         var assistants: [AssistantChunk] = []
+        var notificationBoundary: Int? = nil
+        var toolSinceLastAssistant = false
     }
 
     static func build(sessions: [SessionSummary]) -> [ContentSearchEntry] {
@@ -101,7 +103,7 @@ enum ContentSearchIndexer {
                 ))
             }
 
-            guard let answer = chooseAnswer(turn.assistants),
+            guard let answer = chooseAnswer(turn),
                   !seenAssistants.contains(answer.id) else { return }
             seenAssistants.insert(answer.id)
             result.append(ContentSearchEntry(
@@ -123,6 +125,13 @@ enum ContentSearchIndexer {
             if type == "user" {
                 if let origin = object["origin"] as? [String: Any],
                    (origin["kind"] as? String) == "task-notification" {
+                    if var turn = current,
+                       let candidate = turn.assistants.lastIndex(where: {
+                           AnswerSelection.isSubstantive($0.text)
+                       }) {
+                        turn.notificationBoundary = candidate
+                        current = turn
+                    }
                     return true
                 }
                 guard let message = object["message"] as? [String: Any],
@@ -131,7 +140,14 @@ enum ContentSearchIndexer {
                 let raw = humanText(message)
                 guard !raw.isEmpty, !JSONL.isCommandWrapper(raw) else { return true }
                 let cleaned = JSONL.cleanUserText(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !cleaned.isEmpty, !isNoise(cleaned) else { return true }
+                guard !cleaned.isEmpty else { return true }
+                if isNoise(cleaned) {
+                    // UI keeps interruptions as their own visible turn. Search
+                    // and archive end the previous turn instead, so a later
+                    // "stopped" acknowledgement cannot replace its real answer.
+                    flush()
+                    return true
+                }
 
                 flush()
                 current = TurnDraft(
@@ -142,9 +158,16 @@ enum ContentSearchIndexer {
             } else if type == "assistant" {
                 guard var turn = current,
                       let message = object["message"] as? [String: Any],
-                      let messageID = message["id"] as? String,
-                      let text = assistantText(message) else { return true }
+                      let messageID = message["id"] as? String else { return true }
 
+                let blocks = message["content"] as? [[String: Any]] ?? []
+                let hasTool = blocks.contains { ($0["type"] as? String) == "tool_use" }
+                if hasTool {
+                    turn.toolSinceLastAssistant = true
+                    current = turn
+                }
+
+                guard let text = assistantText(message) else { return true }
                 let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !cleaned.isEmpty else { return true }
 
@@ -158,6 +181,7 @@ enum ContentSearchIndexer {
                         timestamp: JSONL.date(object["timestamp"])
                     ))
                 }
+                turn.toolSinceLastAssistant = hasTool
                 current = turn
             }
             return true
@@ -186,7 +210,16 @@ enum ContentSearchIndexer {
         return text.isEmpty ? nil : text
     }
 
-    private static func chooseAnswer(_ chunks: [AssistantChunk]) -> AssistantChunk? {
+    private static func chooseAnswer(_ turn: TurnDraft) -> AssistantChunk? {
+        let chunks = turn.assistants
+        if let boundary = turn.notificationBoundary,
+           chunks.count > boundary + 1,
+           chunks.indices.contains(boundary),
+           let last = chunks.last,
+           AnswerSelection.isNotificationFollowUp(last.text),
+           AnswerSelection.isSubstantive(chunks[boundary].text) {
+            return chunks[boundary]
+        }
         guard let last = chunks.last else { return nil }
         let lastText = last.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if lastText.count < 16,

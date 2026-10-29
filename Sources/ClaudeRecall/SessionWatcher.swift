@@ -7,6 +7,7 @@ final class SessionWatcher {
     private let onChange: () -> Void
     private let queue = DispatchQueue(label: "com.joshuami449.ccjv.session-watcher")
     private var stream: FSEventStreamRef?
+    private var retryWorkItem: DispatchWorkItem?
 
     init(
         root: URL = FileManager.default.homeDirectoryForCurrentUser
@@ -18,8 +19,11 @@ final class SessionWatcher {
     }
 
     func start() {
-        guard stream == nil,
-              FileManager.default.fileExists(atPath: root.path) else { return }
+        guard stream == nil else { return }
+        guard FileManager.default.fileExists(atPath: root.path) else {
+            scheduleRetry()
+            return
+        }
 
         var context = FSEventStreamContext(
             version: 0,
@@ -49,18 +53,39 @@ final class SessionWatcher {
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             0.5,
             flags
-        ) else { return }
+        ) else {
+            scheduleRetry()
+            return
+        }
 
         FSEventStreamSetDispatchQueue(stream, queue)
         guard FSEventStreamStart(stream) else {
             FSEventStreamInvalidate(stream)
             FSEventStreamRelease(stream)
+            scheduleRetry()
             return
         }
         self.stream = stream
+        if retryWorkItem != nil {
+            retryWorkItem = nil
+            notify()
+        }
+    }
+
+    private func scheduleRetry() {
+        guard retryWorkItem == nil else { return }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.retryWorkItem = nil
+            self.start()
+        }
+        retryWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: item)
     }
 
     func stop() {
+        retryWorkItem?.cancel()
+        retryWorkItem = nil
         guard let stream else { return }
         FSEventStreamStop(stream)
         FSEventStreamInvalidate(stream)

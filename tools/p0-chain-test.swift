@@ -192,7 +192,7 @@ struct P0ChainTests {
             .user(id: "n1", text: "question", timestamp: nil),
             .assistant(
                 id: "real-answer",
-                text: String(repeating: "真正回答", count: 20),
+                text: String(repeating: "真正回答", count: 60),
                 model: "test",
                 timestamp: nil
             ),
@@ -209,6 +209,49 @@ struct P0ChainTests {
         expect(
             notificationTurn[0].process.contains { $0.id == "s-notice" },
             "notification marker stays in process"
+        )
+
+        let substantiveFollowUp = Conversation.groupTurns([
+            .user(id: "n2", text: "continue the task", timestamp: nil),
+            .assistant(
+                id: "progress",
+                text: String(repeating: "阶段性进展", count: 40),
+                model: "test",
+                timestamp: nil
+            ),
+            .system(id: "notice2", text: "后台任务通知"),
+            .assistant(
+                id: "final",
+                text: String(repeating: "最终完成的完整结果", count: 40),
+                model: "test",
+                timestamp: nil
+            )
+        ])
+        expect(
+            substantiveFollowUp[0].answer?.id == "a-final",
+            "a substantive reply after a notification remains the answer"
+        )
+
+        expect(
+            JSONL.isHuman(["type": "user", "isMeta": true]) == false,
+            "isMeta injections are not human questions"
+        )
+
+        let earlyNotification = Conversation.groupTurns([
+            .user(id: "n3", text: "question", timestamp: nil),
+            .system(id: "notice3", text: "后台任务通知"),
+            .assistant(
+                id: "real",
+                text: String(repeating: "完整回答", count: 30),
+                model: "test",
+                timestamp: nil
+            ),
+            .system(id: "notice4", text: "后台任务通知"),
+            .assistant(id: "ack", text: "收到后台通知，无需处理。", model: "test", timestamp: nil)
+        ])
+        expect(
+            earlyNotification[0].answer?.id == "a-real",
+            "a later notification still cannot replace a real answer"
         )
 
         // Archive health + whole-chain capacity protection.
