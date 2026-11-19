@@ -1,6 +1,15 @@
 import Foundation
 
 enum SessionIndexer {
+    private struct CachedSummary {
+        let modifiedAt: Date
+        let size: Int64
+        let summary: SessionSummary
+    }
+
+    private static let cacheLock = NSLock()
+    private static var summaryCache: [String: CachedSummary] = [:]
+
     static func scan() -> [SessionSummary] {
         let fm = FileManager.default
         let root = fm.homeDirectoryForCurrentUser
@@ -15,6 +24,7 @@ enum SessionIndexer {
         }
 
         var results: [SessionSummary] = []
+        var seenPaths: Set<String> = []
 
         for projectDir in projectDirs {
             let isDirectory = (try? projectDir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
@@ -27,7 +37,36 @@ enum SessionIndexer {
             ) else { continue }
 
             for file in files where file.pathExtension == "jsonl" {
-                if let summary = quickSummary(file: file, project: projectDir.lastPathComponent) {
+                let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+                let modifiedAt = values?.contentModificationDate ?? Date.distantPast
+                let size = Int64(values?.fileSize ?? 0)
+                let path = file.path
+                seenPaths.insert(path)
+
+                cacheLock.lock()
+                let cached = summaryCache[path].flatMap { entry in
+                    entry.modifiedAt == modifiedAt && entry.size == size ? entry.summary : nil
+                }
+                cacheLock.unlock()
+
+                if let cached {
+                    results.append(cached)
+                    continue
+                }
+
+                if let summary = quickSummary(
+                    file: file,
+                    project: projectDir.lastPathComponent,
+                    modifiedAt: modifiedAt,
+                    size: size
+                ) {
+                    cacheLock.lock()
+                    summaryCache[path] = CachedSummary(
+                        modifiedAt: modifiedAt,
+                        size: size,
+                        summary: summary
+                    )
+                    cacheLock.unlock()
                     results.append(summary)
                 }
             }
@@ -36,6 +75,10 @@ enum SessionIndexer {
         // A copied/restored project directory can contain the same session
         // UUID twice. Keep one deterministic copy instead of letting a
         // Dictionary(uniqueKeysWithValues:) crash the app.
+        cacheLock.lock()
+        summaryCache = summaryCache.filter { seenPaths.contains($0.key) }
+        cacheLock.unlock()
+
         var byID: [String: SessionSummary] = [:]
         for result in results {
             if let existing = byID[result.id] {
@@ -85,11 +128,13 @@ enum SessionIndexer {
         return nil
     }
 
-    private static func quickSummary(file: URL, project: String) -> SessionSummary? {
+    private static func quickSummary(
+        file: URL,
+        project: String,
+        modifiedAt: Date,
+        size: Int64
+    ) -> SessionSummary? {
         let fm = FileManager.default
-        let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-        let modifiedAt = values?.contentModificationDate ?? Date.distantPast
-        let size = Int64(values?.fileSize ?? 0)
         let date = lastConversationTimestamp(file: file, size: size) ?? modifiedAt
 
         var title = ""

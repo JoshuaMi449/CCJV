@@ -131,6 +131,7 @@ private struct SessionTray: View {
     @State private var outlineContentFrames: [String: CGRect] = [:]
     @State private var groupHeaderFrames: [String: CGRect] = [:]
     @State private var outlineFollowTask: Task<Void, Never>?
+    @State private var outlineCollapseTask: Task<Void, Never>?
     @State private var renameTarget: RenameTarget?
     @State private var groupCreation: GroupCreationRequest?
     @State private var editingGroup: GroupEditorTarget?
@@ -402,7 +403,18 @@ private struct SessionTray: View {
                 .onChange(of: model.activeTurnID) { _, turnID in
                     scrollOutlineToActiveTurn(turnID, proxy: sidebarProxy)
                 }
-                .onChange(of: outlineSessionID) { _, _ in
+                .onChange(of: outlineSessionID) { old, new in
+                    outlineCollapseTask?.cancel()
+                    if new == nil, let old, !old.isEmpty {
+                        // Collapsing removes a tall outline section. Without
+                        // this the list can clamp to its new bottom edge.
+                        outlineCollapseTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 80_000_000)
+                            guard !Task.isCancelled else { return }
+                            sidebarProxy.scrollTo("session-anchor-\(old)", anchor: .center)
+                        }
+                        return
+                    }
                     scrollOutlineToActiveTurn(model.activeTurnID, proxy: sidebarProxy)
                 }
                 .background {
@@ -548,9 +560,11 @@ private struct SessionTray: View {
                     }
             } header: {
                 sessionHeader(session, pinned: true, indented: indented)
+                    .id("session-anchor-\(session.id)")
             }
         } else {
             sessionHeader(session, pinned: false, indented: indented)
+                .id("session-anchor-\(session.id)")
         }
     }
 
