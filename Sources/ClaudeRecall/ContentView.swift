@@ -578,7 +578,8 @@ private struct SessionTray: View {
             isSelected: model.selectedID == session.id,
             isMultiSelected: selectedSessionIDs.contains(session.id),
             lineage: model.lineageInfo(for: session.id),
-            linkBroken: model.isLinkBroken(session.id)
+            linkBroken: model.isLinkBroken(session.id),
+            chainSegmentCount: model.chainSegmentCount(for: session.id)
         ) {
             handleSessionClick(session)
         }
@@ -1124,6 +1125,7 @@ private struct SessionRow: View {
     let isMultiSelected: Bool
     let lineage: SessionLineage?
     let linkBroken: Bool
+    let chainSegmentCount: Int
     let action: () -> Void
     @State private var hovering = false
 
@@ -1238,14 +1240,15 @@ private struct SessionRow: View {
 
     private var lineageBadge: String? {
         guard let lineage else { return nil }
+        let segments = chainSegmentCount > 1 ? " · \(chainSegmentCount) 段" : ""
         if linkBroken {
             return "已断开"
         }
         if lineage.parentID != nil {
-            return lineage.isStrong ? "续接" : "疑似续接"
+            return (lineage.isStrong ? "续接" : "疑似续接") + segments
         }
         if !lineage.children.isEmpty {
-            return "后续"
+            return "后续" + segments
         }
         if lineage.isAmbiguous {
             return "续接？"
@@ -2233,6 +2236,16 @@ private struct ReadingCanvas: View {
         HStack(spacing: 8) {
             statPill("轮次", "\(conversation.turns.count)")
 
+            if let start = conversation.startedAt {
+                let end = conversation.endedAt ?? conversation.session.date
+                if start <= end {
+                    statPill("创建", "\(start.shortDateLabel) \(start.timeLabel)")
+                        .help("本会话（含合并前段）第一条消息的时间。")
+                    statPill("跨度", spanLabel(from: start, to: end))
+                        .help("从第一条消息到最后一条消息的跨度，不是连续运行时长。")
+                }
+            }
+
             if conversation.session.isArchived {
                 statPill("来源", "归档")
                     .help("原始 JSON 已被清理；当前内容来自 CCJV 本地归档。")
@@ -2267,10 +2280,9 @@ private struct ReadingCanvas: View {
                 }
             }
 
-            if conversation.segments.count > 1,
-               model.lineageInfo(for: conversation.session.id)?.parentID == nil {
-                statPill("合并", "\(conversation.segments.count) 段")
-                    .help("后续段已并入下方；终端 resume 只恢复本段。")
+            if conversation.segments.count > 1 {
+                statPill("链", "\(conversation.segments.count) 段")
+                    .help("同一段对话因压缩续接分成了多个 json；这里按顺序合并显示，终端 resume 只恢复本段。")
             }
 
             if conversation.branchCount > 0 {
@@ -2307,6 +2319,16 @@ private struct ReadingCanvas: View {
 
             Spacer(minLength: 0)
         }
+    }
+
+    private func spanLabel(from start: Date, to end: Date) -> String {
+        let seconds = max(0, end.timeIntervalSince(start))
+        let minutes = Int(seconds / 60)
+        if minutes < 1 { return "不到 1 分钟" }
+        if minutes < 60 { return "\(minutes) 分钟" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours) 小时" }
+        return "\(hours / 24) 天"
     }
 
     private func statPill(_ label: String, _ value: String) -> some View {

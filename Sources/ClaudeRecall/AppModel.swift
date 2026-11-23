@@ -471,6 +471,10 @@ final class AppModel: ObservableObject {
         chainGraph.chain(for: id)
     }
 
+    func chainSegmentCount(for id: String) -> Int {
+        chainIDs(for: id).count
+    }
+
     func chainRoot(for id: String) -> String {
         chainGraph.root(for: id)
     }
